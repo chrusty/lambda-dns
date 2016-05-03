@@ -4,15 +4,14 @@ var ROUTE53_DOMAIN_NAME_TAG = 'r53-domain-name';
 var ROUTE53_ZONE_ID_TAG = 'r53-zone-id';
 var TTL_SECONDS = 300;
 
-// Log the config:
-console.log('R53 Domain-name tag: "' + ROUTE53_DOMAIN_NAME_TAG + '"');
-console.log('R53 Hosted-zone ID tag: "' + ROUTE53_ZONE_ID_TAG + '"');
-console.log('Role tag: "' + ROLE_TAG + '"');
-console.log('TTL: "' + TTL_SECONDS + '"');
-
 // Handler:
 exports.handler = function (event, context) {
-    // console.log(event)
+    // Log the config:
+    console.log('R53 Domain-name tag: "' + ROUTE53_DOMAIN_NAME_TAG + '"');
+    console.log('R53 Hosted-zone ID tag: "' + ROUTE53_ZONE_ID_TAG + '"');
+    console.log('Role tag: "' + ROLE_TAG + '"');
+    console.log('TTL: "' + TTL_SECONDS + '"');
+
     var AWS = require('aws-sdk');
     var async = require('async');
     var asgMessage = JSON.parse(event.Records[0].Sns.Message);
@@ -20,7 +19,7 @@ exports.handler = function (event, context) {
     var asgName = asgMessage.AutoScalingGroupName;
     var asgRegion = 'eu-west-1'
 
-    // console.log(asgEvent);
+    // Run if we're processing a launch or terminate event:
     if (asgEvent === "autoscaling:EC2_INSTANCE_LAUNCH" || asgEvent === "autoscaling:EC2_INSTANCE_TERMINATE") {
         console.log("Handling Launch/Terminate Event for " + asgName);
 
