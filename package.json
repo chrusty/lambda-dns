@@ -1,0 +1,9 @@
+{
+    "dependencies": {
+        "async" : "latest",
+        "aws-sdk" : "latest"
+    },
+    "description": "AWS Lambda function to maintain Route53 DNS records from autoscaling events",
+    "license": "UNLICENSED",
+    "repository": "https://github.com/chrusty/lambda-dns"
+}
