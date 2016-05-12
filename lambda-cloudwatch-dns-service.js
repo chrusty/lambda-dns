@@ -1,4 +1,5 @@
-// Define some tag-names:
+var AWS = require('aws-sdk');
+var async = require('async');
 var ROLE_TAG = 'role';
 var ROUTE53_DOMAIN_NAME_TAG = 'r53-domain-name';
 var ROUTE53_ZONE_ID_TAG = 'r53-zone-id';
@@ -7,41 +8,37 @@ var TTL_SECONDS = 300;
 // Handler:
 exports.handler = function (message, context) {
     // Log the raw "event":
-    console.log(JSON.stringify(message));
+    // console.log(JSON.stringify(message));
+    var cloudWatchMessage = JSON.parse(JSON.stringify(message));
 
     // Log the config:
     console.log('R53 Domain-name tag: "' + ROUTE53_DOMAIN_NAME_TAG + '"');
     console.log('R53 Hosted-zone ID tag: "' + ROUTE53_ZONE_ID_TAG + '"');
     console.log('Role tag: "' + ROLE_TAG + '"');
     console.log('TTL: "' + TTL_SECONDS + '"');
-
-    var AWS = require('aws-sdk');
-    var async = require('async');
-
-    var asgMessage = JSON.parse(message);
-    var asgEvent = asgMessage.Event;
-    var asgName = asgMessage.AutoScalingGroupName;
-    var asgRegion = asgMessage.region;
+    console.log('Region: "' + cloudWatchMessage['region'] + '"')
+    console.log('Autoscaling Group: "' + cloudWatchMessage['detail']['AutoScalingGroupName'] + '"')
+    console.log('Autoscaling Event: "' + cloudWatchMessage['detail-type'] + '"')
 
     // Run if we're processing a launch or terminate event:
-    if (asgEvent === "autoscaling:EC2_INSTANCE_LAUNCH" || asgEvent === "autoscaling:EC2_INSTANCE_TERMINATE") {
-        console.log("Handling " + asgEvent + " Event for " + asgName);
+    if (cloudWatchMessage['detail-type'] === "EC2 Instance Launch Successful" || cloudWatchMessage['detail-type'] === "EC2 Instance Terminate Successful") {
+        console.log("Handling " + cloudWatchMessage['detail-type'] + " Event for " + cloudWatchMessage['detail']['AutoScalingGroupName']);
 
         async.waterfall(
             [
                 // Get details about the autoscaling-group (instances, tags etc):
                 function describeAutoscalingGroup(next) {
                     console.log("* Retrieving ASG details ...");
-                    var autoscaling = new AWS.AutoScaling({region: asgRegion});
+                    var autoscaling = new AWS.AutoScaling({region: cloudWatchMessage['region']});
 
                     // Look up the autoscaling group:
                     autoscaling.describeAutoScalingGroups(
                         {
-                            AutoScalingGroupNames: [asgName],
+                            AutoScalingGroupNames: [cloudWatchMessage['detail']['AutoScalingGroupName']],
                             MaxRecords: 1
                         }, function(err, response) {
                             if (response.AutoScalingGroups.length == 0) {
-                                next('Unable to find autoscaling group "' + asgName + '"!')
+                                next('Unable to find autoscaling group "' + cloudWatchMessage['detail']['AutoScalingGroupName'] + '"!')
                             } else {
                                 next(err, response.AutoScalingGroups[0]);
                             }
@@ -70,11 +67,11 @@ exports.handler = function (message, context) {
 
                     // Make sure we found one:
                     if (route53MetaData.role == "") {
-                        next('ASG: ' + asgName + ' does not define a "' + ROLE_TAG + '" tag!');
+                        next('ASG: ' + cloudWatchMessage['detail']['AutoScalingGroupName'] + ' does not define a "' + ROLE_TAG + '" tag!');
                     } else if (route53MetaData.domainName == "") {
-                        next('ASG: ' + asgName + ' does not define a "' + ROUTE53_DOMAIN_NAME_TAG + '" tag!');
+                        next('ASG: ' + cloudWatchMessage['detail']['AutoScalingGroupName'] + ' does not define a "' + ROUTE53_DOMAIN_NAME_TAG + '" tag!');
                     } else if (route53MetaData.zoneId == "") {
-                        next('ASG: ' + asgName + ' does not define a "' + ROUTE53_ZONE_ID_TAG + '" tag!');
+                        next('ASG: ' + cloudWatchMessage['detail']['AutoScalingGroupName'] + ' does not define a "' + ROUTE53_ZONE_ID_TAG + '" tag!');
                     }
 
                     next(null, route53MetaData, autoScalingGroup);
@@ -104,7 +101,7 @@ exports.handler = function (message, context) {
                 function retrieveInstanceMetadata(route53MetaData, instanceIds, next) {
                     // console.log(instanceIds)
                     console.log("* Getting instance metadata ...");
-                    var ec2 = new AWS.EC2({region: asgRegion});
+                    var ec2 = new AWS.EC2({region: cloudWatchMessage['region']});
 
                     // Describe the instances for this autoscaling group:
                     ec2.describeInstances(
@@ -126,7 +123,7 @@ exports.handler = function (message, context) {
                     for (reservation of reservations) {
 
                         // Region-wide record:
-                        regionWideName = route53MetaData.role + '.' + asgRegion + '.i.' + route53MetaData.domainName;
+                        regionWideName = route53MetaData.role + '.' + cloudWatchMessage['region'] + '.i.' + route53MetaData.domainName;
                         if (addressMappings.hasOwnProperty(regionWideName)) {
                             addressMappings[regionWideName].push({Value: reservation.Instances[0].PrivateIpAddress});
                         } else {
@@ -191,7 +188,7 @@ exports.handler = function (message, context) {
             }
         )
     } else {
-        console.log("Unsupported ASG event: " + asgName, asgEvent);
+        console.log('Unsupported ASG event: "' + cloudWatchMessage['detail-type'] + '"');
     }
     console.log("Finished");
 };
