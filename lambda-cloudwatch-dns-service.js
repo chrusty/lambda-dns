@@ -89,13 +89,8 @@ exports.handler = function (message, context) {
                         }
                     }
 
-                    // Make sure we found some running instances:
-                    if (instanceIds.length == 0) {
-                        next('No running instances were found!')
-                    } else {
-                        console.log('  => Running instances (' + instanceIds.length + '): ' + instanceIds);
-                        next(null, route53MetaData, instanceIds)
-                    }
+                    console.log('  => Found ' + instanceIds.length + ' running instances: ' + instanceIds);
+                    next(null, route53MetaData, instanceIds)
                 },
                 // Retrieve instance metadata (availability-zones, IP-addresses):
                 function retrieveInstanceMetadata(route53MetaData, instanceIds, next) {
@@ -143,10 +138,10 @@ exports.handler = function (message, context) {
 
                     next(null, route53MetaData, addressMappings);
                 },
-                // Create DNS records in Route53:
-                function createDNSRecords(route53MetaData, addressMappings, next) {
+                // Update DNS records in Route53:
+                function UpdateDNSRecords(route53MetaData, addressMappings, next) {
                     // console.log(addressMappings)
-                    console.log("* Creating DNS records ...");
+                    console.log("* Updating DNS records ...");
                     var route53 = new AWS.Route53();
                     var changeResourceRecordSetsRequest = {
                         ChangeBatch: {
@@ -174,6 +169,21 @@ exports.handler = function (message, context) {
                         );
 
                     });
+
+                    // See if we need to delete stuff:
+                    regionWideName = route53MetaData.role + '.' + cloudWatchMessage['region'] + '.i.' + route53MetaData.domainName;
+                    if addressMappings.has(regionWideName) == false {
+                        console.log('  => ' + regionWideName + ' = DELETE');
+                        changeResourceRecordSetsRequest.ChangeBatch.Changes.push(
+                            {
+                                Action: 'DELETE',
+                                ResourceRecordSet: {
+                                    Name: regionWideName,
+                                    Type: 'A'
+                                }
+                            }
+                        );
+                    }
 
                     // Submit the changeResourceRecordSets() request to Route53:
                     route53.changeResourceRecordSets(changeResourceRecordSetsRequest, next);
