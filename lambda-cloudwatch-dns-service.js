@@ -192,7 +192,7 @@ exports.handler = function (message, context) {
                                     StartRecordType: 'A',
                                     MaxItems: '1'
                                 }, function(err, response) {
-                                    if (response.AutoScalingGroups.length == 0) {
+                                    if (response.ResourceRecordSets.length == 0) {
                                         console.log('  => Unable to find existing record "' + deleteRecordName + '" - no need to delete')
                                     } else {
                                         // Delete the record:
