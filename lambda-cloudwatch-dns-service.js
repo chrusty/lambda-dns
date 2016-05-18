@@ -50,7 +50,7 @@ exports.handler = function (message, context) {
                 function processTags(autoScalingGroup, next) {
                     // console.log(autoScalingGroup)
                     console.log("* Processing ASG tags ...");
-                    var route53MetaData = {}
+                    var route53MetaData = {};
 
                     // Search for our role-tag in the ASGs list of tags:
                     for (tag of autoScalingGroup.Tags) { 
@@ -81,7 +81,7 @@ exports.handler = function (message, context) {
                 function retrieveRunningInstanceIds(route53MetaData, autoScalingGroup, next) {
                     // console.log(autoScalingGroup)
                     console.log("* Finding running instances ...");
-                    var instanceIds = []
+                    var instanceIds = [];
 
                     // Find instances which are running:
                     for (instance of autoScalingGroup.Instances) { 
@@ -91,7 +91,7 @@ exports.handler = function (message, context) {
                     }
 
                     console.log('  => Found ' + instanceIds.length + ' running instances: ' + instanceIds);
-                    next(null, route53MetaData, instanceIds)
+                    next(null, route53MetaData, instanceIds);
                 },
                 // Retrieve instance metadata (availability-zones, IP-addresses):
                 function retrieveInstanceMetadata(route53MetaData, instanceIds, next) {
@@ -99,21 +99,26 @@ exports.handler = function (message, context) {
                     console.log("* Getting instance metadata ...");
                     var ec2 = new AWS.EC2({region: cloudWatchMessage['region']});
 
-                    // Describe the instances for this autoscaling group:
-                    ec2.describeInstances(
-                        {
-                            DryRun: false,
-                            InstanceIds: instanceIds
-                        }, function(err, response) {
-                            next(err, route53MetaData, response.Reservations);
-                        }
-                    );
+                    // See if we need to bother looking up Instance IDs:
+                    if (instanceIds.length == 0) {
+                        next(null, route53MetaData, []);
+                    } else {
+                        // Describe the instances for this autoscaling group:
+                        ec2.describeInstances(
+                            {
+                                DryRun: false,
+                                InstanceIds: instanceIds
+                            }, function(err, response) {
+                                next(err, route53MetaData, response.Reservations);
+                            }
+                        );
+                    }
                 },
                 // Build DNS address-mappings:
                 function buildAddressMappings(route53MetaData, reservations, next) {
                     // console.log(reservations)
                     console.log("* Building address-mappings for DNS records ...");
-                    var addressMappings = {}
+                    var addressMappings = {};
 
                     // Search for our role-tag in the ASGs list of tags:
                     for (reservation of reservations) {
@@ -149,7 +154,7 @@ exports.handler = function (message, context) {
                             Changes: []
                         },
                         HostedZoneId: route53MetaData.zoneId
-                    }
+                    };
 
                     // Iterate through all of the record-names in addressMappings:
                     Object.keys(addressMappings).forEach(function (recordName) { 
