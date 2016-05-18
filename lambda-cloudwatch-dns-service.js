@@ -1,5 +1,6 @@
 var AWS = require('aws-sdk');
 var async = require('async');
+var route53 = new AWS.Route53();
 var ROLE_TAG = 'role';
 var ROUTE53_DOMAIN_NAME_TAG = 'r53-domain-name';
 var ROUTE53_ZONE_ID_TAG = 'r53-zone-id';
@@ -144,11 +145,10 @@ exports.handler = function (message, context) {
 
                     next(null, route53MetaData, addressMappings);
                 },
-                // Update DNS records in Route53:
-                function UpdateDNSRecords(route53MetaData, addressMappings, next) {
+                // Prepare DNS upsert changes for Route53:
+                function PrepareDNSUpserts(route53MetaData, addressMappings, next) {
                     // console.log(addressMappings)
-                    console.log("* Updating DNS records ...");
-                    var route53 = new AWS.Route53();
+                    console.log("* Preparing DNS upsert requests ...");
                     var changeResourceRecordSetsRequest = {
                         ChangeBatch: {
                             Changes: []
@@ -157,16 +157,16 @@ exports.handler = function (message, context) {
                     };
 
                     // Iterate through all of the record-names in addressMappings:
-                    Object.keys(addressMappings).forEach(function (recordName) { 
-                        var recordValue = addressMappings[recordName];
-                        console.log('  => ' + recordName + ' = ' + recordValue);
+                    Object.keys(addressMappings).forEach(function (upsertRecordName) { 
+                        var recordValue = addressMappings[upsertRecordName];
+                        console.log('  => ' + upsertRecordName + ' = ' + JSON.stringify(recordValue));
 
                         // Add a change to the changeBatch:
                         changeResourceRecordSetsRequest.ChangeBatch.Changes.push(
                             {
                                 Action: 'UPSERT',
                                 ResourceRecordSet: {
-                                    Name: recordName,
+                                    Name: upsertRecordName,
                                     Type: 'A',
                                     TTL: TTL_SECONDS,
                                     ResourceRecords: recordValue
@@ -176,13 +176,19 @@ exports.handler = function (message, context) {
 
                     });
 
-                    // See if we need to delete the region-wide record:
+                    next(null, route53MetaData, addressMappings, changeResourceRecordSetsRequest);
+                },
+                // Prepare DNS delete changes for Route53:
+                function PrepareDNSDeletes(route53MetaData, addressMappings, changeResourceRecordSetsRequest, next) {
+                    console.log("* Preparing DNS delete requests ...");
+                    var deletesProcessed = 0;
+
+                    // Build deleteable names:
                     regionWideName = route53MetaData.role + '.' + cloudWatchMessage['region'] + '.i.' + route53MetaData.domainName;
                     availabilityZoneName = route53MetaData.role + '.' + cloudWatchMessage['detail']['Details']['Availability Zone'] + '.i.' + route53MetaData.domainName;
 
                     for (deleteRecordName of [regionWideName, availabilityZoneName]) {
                         if(addressMappings.hasOwnProperty(deleteRecordName) == false) {
-                            console.log('  => ' + deleteRecordName + ' = DELETE');
 
                             // Look up the existing record (because r53 won't let us blindly delete without knowing the value):
                             route53.listResourceRecordSets(
@@ -192,31 +198,53 @@ exports.handler = function (message, context) {
                                     StartRecordType: 'A',
                                     MaxItems: '1'
                                 }, function(err, response) {
+                                    // See if we got an error:
+                                    if (err) {
+                                        console.log('Error looking up record: ' + err);
+                                        console.log('Stack: ' + err.stack);
+                                    };
+
+                                    // See if we got any results:
                                     if (response.ResourceRecordSets.length == 0) {
-                                        console.log('  => Unable to find existing record "' + deleteRecordName + '" - no need to delete')
+                                        console.log('  => Unable to find existing record "' + deleteRecordName + '" - no need to delete');
                                     } else {
-                                        // Delete the record:
+                                        // Add a change to the changeBatch:
                                         changeResourceRecordSetsRequest.ChangeBatch.Changes.push(
                                             {
                                                 Action: 'DELETE',
                                                 ResourceRecordSet: {
                                                     Name: deleteRecordName,
                                                     Type: 'A',
+                                                    TTL: TTL_SECONDS,
                                                     ResourceRecords: response.ResourceRecordSets[0].ResourceRecords
                                                 }
                                             }
                                         );
-                                        console.log('  => Added "' + deleteRecordName + '" deletion to change-batch.')
-                                    }
-
+                                        console.log('  => ' + deleteRecordName + ' = DELETE');
+                                    };
+                                    deletesProcessed += 1;
                                 }
                             );
+                        };
+                    };
 
-                        }
-                    }
+                    while (deletesProcessed < 2) {
+                        console.log('Deletes: ' + deletesProcessed);
+                        if (deletesProcessed >= 2) {
+                            next(null, changeResourceRecordSetsRequest);
+                        };
+                    };
+                },
+                // Apply DNS changes to Route53:
+                function ApplyDNSCHanges(changeResourceRecordSetsRequest, next) {
+                    console.log("* Applying DNS changes ...");
+                    console.log('  => ' + JSON.stringify(changeResourceRecordSetsRequest.ChangeBatch.Changes));
 
                     // Submit the changeResourceRecordSets() request to Route53:
-                    route53.changeResourceRecordSets(changeResourceRecordSetsRequest, next);
+                    route53.changeResourceRecordSets(changeResourceRecordSetsRequest, function(err, response) {
+                        console.log('Response: ' + JSON.stringify(response));
+                        next(err);
+                    });
                 }
             ], function (err) {
               if (err) {
