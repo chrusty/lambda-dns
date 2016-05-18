@@ -170,19 +170,40 @@ exports.handler = function (message, context) {
 
                     });
 
-                    // See if we need to delete stuff:
+                    // See if we need to delete the region-wide record:
                     regionWideName = route53MetaData.role + '.' + cloudWatchMessage['region'] + '.i.' + route53MetaData.domainName;
-                    if addressMappings.has(regionWideName) == false {
+                    if(addressMappings.hasOwnProperty(regionWideName) == false) {
                         console.log('  => ' + regionWideName + ' = DELETE');
-                        changeResourceRecordSetsRequest.ChangeBatch.Changes.push(
+
+                        // Look up the existing record (because r53 won't let us blindly delete without knowing the value):
+                        route53.listResourceRecordSets(
                             {
-                                Action: 'DELETE',
-                                ResourceRecordSet: {
-                                    Name: regionWideName,
-                                    Type: 'A'
+                                HostedZoneId: route53MetaData.zoneId,
+                                StartRecordName: regionWideName,
+                                StartRecordType: 'A',
+                                MaxItems: '1'
+                            }, function(err, response) {
+                                if (response.AutoScalingGroups.length == 0) {
+                                    console.log('  => Unable to find existing record "' + regionWideName + '" - no need to delete')
+                                } else {
+                                    // Delete the record:
+                                    changeResourceRecordSetsRequest.ChangeBatch.Changes.push(
+                                        {
+                                            Action: 'DELETE',
+                                            ResourceRecordSet: {
+                                                Name: regionWideName,
+                                                Type: 'A',
+                                                ResourceRecords: response.ResourceRecordSets[0].ResourceRecords
+                                            }
+                                        }
+                                    );
+                                    console.log('  => Added "' + regionWideName + '" deletion to change-batch.')
                                 }
+
                             }
                         );
+
+
                     }
 
                     // Submit the changeResourceRecordSets() request to Route53:
